@@ -8,24 +8,36 @@ IMAGE_FILE_HEADER FileHeader;
 IMAGE_OPTIONAL_HEADER OptionHeader;
 IMAGE_SECTION_HEADER *pSectionHeader;
 
-unsigned char shellcode[] = "";
-
 int _tmain(int argc, _TCHAR *argv[])
 {
-	if (argc == 2)
+	if (argc > 2)
 	{
 		TCHAR *PEFileName = argv[1];
+		TCHAR *SCFileName = argv[2];
+
 		std::wcout << "PE FileName: " << PEFileName << std::endl;
+		std::wcout << "SC FileName: " << SCFileName << std::endl;
 
 		FILE *pPEFile;
 		errno_t peFileError = _wfopen_s(&pPEFile, PEFileName, _T("rb+"));
 
+		FILE *pShellcodeFile;
+		errno_t scFileError = _wfopen_s(&pShellcodeFile, SCFileName, _T("rb"));
+
 		// 打开文件判断
-		if (peFileError != 0)
+		if (scFileError != 0 || peFileError != 0)
 		{
 			std::cout << "Open File Error!" << std::endl;
 			exit(0);
 		}
+
+		fseek(pShellcodeFile, 0, SEEK_END);
+		DWORD lShellCodeSize = ftell(pShellcodeFile); // 获取整个文件的大小
+		UCHAR *cShellCodeBuff = new UCHAR[lShellCodeSize];
+		memset(cShellCodeBuff, 0, lShellCodeSize);
+		fseek(pShellcodeFile, 0, SEEK_SET);
+		fread(cShellCodeBuff, 1, lShellCodeSize, pShellcodeFile);
+		fclose(pShellcodeFile);
 
 		// 读取DOS头
 		fread(&DosHeader, 1, sizeof(IMAGE_DOS_HEADER), pPEFile);
@@ -159,9 +171,9 @@ int _tmain(int argc, _TCHAR *argv[])
 		pSectionHeader->PointerToRawData = PointerToRawData + SizeOfRawData;
 		pSectionHeader->VirtualAddress = VirtualAddress + SizeOfRawData;
 		// Shellcode的大小除以SectionAlignment
-		DWORD divValue = sizeof(shellcode) / SectionAlignment;
+		DWORD divValue = lShellCodeSize / SectionAlignment;
 		// 向上取整，有余数就+1
-		DWORD remainValue = sizeof(shellcode) % SectionAlignment;
+		DWORD remainValue = lShellCodeSize % SectionAlignment;
 		DWORD ceilValue = remainValue == 0 ? divValue : divValue + 1;
 		DWORD sectionAlignmentValue = ceilValue * SectionAlignment;
 		pSectionHeader->SizeOfRawData = sectionAlignmentValue;
@@ -191,16 +203,9 @@ int _tmain(int argc, _TCHAR *argv[])
 		// 扩容数据，插入Shellcode
 		void *newMemory = calloc(1, sectionAlignmentValue);
 		fseek(pPEFile, PointerToRawData + SizeOfRawData, SEEK_SET);
-		memcpy(newMemory, shellcode, sizeof(shellcode));
+		memcpy(newMemory, cShellCodeBuff, lShellCodeSize);
 		fwrite(newMemory, sectionAlignmentValue, 1, pPEFile);
 		free(newMemory);
-
-		/* JMP回原地址
-		DWORD originAddress = AddressOfEntryPoint - NTHeader.OptionalHeader.AddressOfEntryPoint - sizeof(shellcode) - 3;
-
-		fseek(pPEFile, PointerToRawData + SizeOfRawData + sizeof(shellcode) - 1, SEEK_SET);
-		fwrite(&originAddress, sizeof(originAddress), 1, pPEFile);
-		*/
 
 		// 最后关闭文件、释放内存
 		fclose(pPEFile);
@@ -208,7 +213,7 @@ int _tmain(int argc, _TCHAR *argv[])
 	}
 	else
 	{
-		std::cout << "Usage: Bundler.exe PE_FILE" << std::endl;
+		std::cout << "Usage: Bundler.exe PE_FILE SC_FILE" << std::endl;
 	}
 	return 0;
 }
